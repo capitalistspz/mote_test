@@ -141,11 +141,6 @@ size_t wiimote::handle_interleaved_b(uint8_t const *data) {
 }
 
 size_t wiimote::handle_mem_read(uint8_t *data) {
-    if (mem_req_queue.wait_for_read){
-        mem_req_queue.wait_for_read = false;
-        mem_req_queue.control_mutex.unlock();
-        mem_req_queue.control_cv.notify_one();
-    }
     constexpr size_t data_size = sizeof(MemoryReadData);
     auto pack = reinterpret_cast<MemoryReadData const*>(data);
     const auto error = pack->error;
@@ -166,11 +161,19 @@ size_t wiimote::handle_mem_read(uint8_t *data) {
         return data_size;
     }
 
-    if (error){
-
-        log_info("Popped request: (ID: {}, Address: {:x}, Size: {})",front.id, bswap_on_le(front.address.as_uint32()), front.expected_size);
+    // "Completes" the read request
+    auto do_pop = [&]{
+        if (mem_req_queue.wait_for_read){
+            mem_req_queue.wait_for_read = false;
+            mem_req_queue.control_mutex.unlock();
+            mem_req_queue.control_cv.notify_one();
+            log_info("Popped request: (ID: {}, Address: {:x}, Size: {})",front.id, bswap_on_le(front.address.as_uint32()), front.expected_size);
+        }
         m_state.read_requests.pop();
+    };
 
+    if (error){
+        do_pop();
         switch (error) {
             case 7: {
                 log_error("Attempted to read from write only address {:02x}, or from disconnected expansion",
@@ -188,20 +191,16 @@ size_t wiimote::handle_mem_read(uint8_t *data) {
         return data_size;
     }
 
-    //log_info("Received {} bytes: \n\t{::02x}", size, pack->data | std::views::take(size));
     std::copy(pack->data.cbegin(), pack->data.cbegin() + size, std::back_inserter(front.data));
-
     if (front.expected_size != front.data.size()){
         return data_size;
     }
+
     const MemReadRequest front_copy = front;
-    log_info("Popped request: (ID: {}, Address: {:x}, Size: {})",front.id, bswap_on_le(front.address.as_uint32()), front.expected_size);
-    m_state.read_requests.pop();
+    do_pop();
     m_mem_read_update_mutex.unlock();
     on_mem_read(front_copy);
-
     return data_size;
-
 }
 
 void wiimote::on_mem_read(MemReadRequest const &req) {

@@ -315,7 +315,7 @@ void wiimote::mem_req_loop(){
             }
             queue.pop();
             mem_req_queue.element_cv.notify_one();
-            // To be unlocked in read thread by acknowledge (0x22 or Read reports
+            // To be unlocked in read thread by acknowledge (0x22) or read report (0x21)
             ul.release();
         }
 
