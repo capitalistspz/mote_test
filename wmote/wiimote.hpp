@@ -114,7 +114,7 @@ public:
 
     wiimote(wiimote const &) = delete;
 
-    wiimote(wiimote &&);
+    wiimote(wiimote &&) noexcept ;
 
     ~wiimote();
 
@@ -180,7 +180,7 @@ public:
 
     void set_leds(led_flags leds);
 
-    bool test_connected();
+    void request_status();
 
 private: // Threading
     // For buttons

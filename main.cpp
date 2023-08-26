@@ -20,7 +20,7 @@ int main() {
     dsu_server server;
     // Server handlers
     auto wm_status_get = [&mote](uint8_t slot_no) {
-        auto connected = mote.test_connected();
+        auto connected = true;
         auto wm_status = mote.status();
 
         types::device_info dev;

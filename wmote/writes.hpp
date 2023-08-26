@@ -28,8 +28,14 @@ struct MemWriteReport {
     output_reports report = output_reports::REP_OUT_WRITE_TO_MEMORY;
     std::array<uint8_t, 4> address;
     uint8_t size;
-    std::array<uint8_t, 16> data;
+    std::array<uint8_t, 16> data{0};
 
 };
 static_assert(sizeof(MemWriteReport) == 22);
+
+struct RequestStatusReport {
+    output_reports report = output_reports::REP_OUT_STATUS_INFORMATION_REQUEST;
+    uint8_t _unused;
+};
+static_assert(sizeof(RequestStatusReport) == 2);
 #pragma pack(pop)

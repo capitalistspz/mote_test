@@ -1,13 +1,9 @@
 project(wmote)
 
-include(FetchContent)
 option(ENABLE_LOGGING "Enables logging, uses fmt" ON)
-FetchContent_Declare(hidapi
-        GIT_REPOSITORY https://github.com/libusb/hidapi.git
-        GIT_TAG hidapi-0.14.0
-)
 
-FetchContent_MakeAvailable(hidapi)
+find_package(hidapi REQUIRED)
+
 
 find_package(fmt REQUIRED)
 add_library(wmote wiimote.cpp wiimote.hpp wiimote_handle.cpp

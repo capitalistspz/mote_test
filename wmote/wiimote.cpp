@@ -25,7 +25,7 @@ std::string to_string(std::wstring_view wstr){
 constexpr static unsigned int MAX_MESSAGE_LENGTH = 22;
 
 wiimote::wiimote(const std::filesystem::path &device_path)
-        : m_device(hid_open_path(device_path.string().c_str())) {
+        : m_device(hid_open_path(device_path.string().c_str())), m_extension(std::monostate{}) {
     if (!m_device)
         throw std::runtime_error(to_string(hid_error(nullptr)));
 
@@ -34,7 +34,7 @@ wiimote::wiimote(const std::filesystem::path &device_path)
 }
 
 wiimote::wiimote(uint16_t vendor_id, uint16_t product_id, std::wstring_view serial)
-: m_device(hid_open(vendor_id, product_id, serial.data())) {
+: m_device(hid_open(vendor_id, product_id, serial.data())), m_extension(std::monostate{}) {
     if (!m_device)
         throw std::runtime_error(to_string(hid_error(nullptr)));
 
@@ -42,7 +42,7 @@ wiimote::wiimote(uint16_t vendor_id, uint16_t product_id, std::wstring_view seri
 
 }
 
-wiimote::wiimote(wiimote && other) {
+wiimote::wiimote(wiimote && other) noexcept {
     // Close other thread
     other.m_running = false;
     other.m_read_thread.join();
@@ -69,13 +69,16 @@ wiimote::~wiimote() {
 
 void wiimote::init() {
     m_running = true;
-    m_write_thread = std::thread([this]{ write_loop(); });
-    m_read_thread = std::thread([this]{ read_loop(); });
-    mem_req_queue.thread = std::thread([this] {mem_req_loop();});
-    set_reporting_mode(true, REP_IN_BUTTONS_ACC_IR_12B);
-    request_wiimote_calibration(true);
+    m_write_thread = std::thread(&wiimote::write_loop, this);
+    m_read_thread = std::thread(&wiimote::read_loop, this);
+    mem_req_queue.thread = std::thread(&wiimote::mem_req_loop, this);
+
+    request_status();
     request_extension();
     detect_motionplus();
+
+    set_reporting_mode(true, REP_IN_BUTTONS_ACC_IR_12B);
+    request_wiimote_calibration(true);
 }
 
 void wiimote::write(std::vector<uint8_t>&& data) {
@@ -87,16 +90,17 @@ void wiimote::write(std::vector<uint8_t>&& data) {
 void wiimote::write(std::span<uint8_t> data) {
     data[1] |= get_rumble();
     std::scoped_lock writer_lock(m_writer_mutex);
-    m_write_queue.push({data.begin(), data.end()});
+    m_write_queue.emplace(data.begin(), data.end());
 }
 
 ssize_t wiimote::read(std::span<uint8_t> data) {
     return hid_read(m_device, data.data(), data.size());
 }
 
-bool wiimote::test_connected(){
-    std::array<uint8_t const, 2> data = {REP_OUT_STATUS_INFORMATION_REQUEST, m_state.rumble};
-    return hid_write(m_device, data.data(), data.size());
+void wiimote::request_status(){
+    RequestStatusReport rep{};
+    auto rep_span = span_of(rep);
+    write(rep_span);
 }
 
 void wiimote::mem_request_write(std::array<uint8_t, 4> address, std::vector<uint8_t>&& data) {
@@ -104,7 +108,7 @@ void wiimote::mem_request_write(std::array<uint8_t, 4> address, std::vector<uint
     report.address = address;
     report.size = data.size();
 
-    std::move(data.begin(), data.end(), report.data.begin() + 6);
+    std::move(data.begin(), data.end(), report.data.begin());
     write_mem_write_report(report);
 }
 
@@ -155,7 +159,6 @@ void wiimote::activate_motionplus(MotionPlusMode mode) {
         default:
             return;
     }
-    mem_request_read(addresses::motionplus_identifier, 6);
 }
 
 void wiimote::init_motionplus() {
@@ -289,12 +292,12 @@ void wiimote::write_loop(){
 
 void wiimote::write_mem_read_report(MemReadReport report){
     std::scoped_lock ul(mem_req_queue.element_mutex);
-    mem_req_queue.queue.push(std::move(report));
+    mem_req_queue.queue.emplace(report);
 }
 
 void wiimote::write_mem_write_report(MemWriteReport report){
     std::scoped_lock ul(mem_req_queue.element_mutex);
-    mem_req_queue.queue.push(std::move(report));
+    mem_req_queue.queue.emplace(report);
 }
 
 void wiimote::mem_req_loop(){

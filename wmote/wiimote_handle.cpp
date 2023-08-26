@@ -11,6 +11,17 @@ size_t wiimote::handle_status(uint8_t const *const data) {
     {
         std::scoped_lock lock(m_status_mutex);
         m_state.status.battery_very_low = status->battery_very_low;
+
+        if (std::holds_alternative<std::monostate>(m_extension) && status->extension_connected){
+            log_info("Extension connected");
+            request_extension();
+            detect_motionplus();
+        }
+        else if (!std::holds_alternative<std::monostate>(m_extension) && !status->extension_connected){
+            log_info("Extension disconnected");
+            m_extension = {};
+            m_motionplus = {};
+        }
         m_state.status.extension_connected = status->extension_connected;
         m_state.status.speaker_enabled = status->speaker_enabled;
         m_state.status.ir_enabled = status->ir_enabled;
@@ -214,6 +225,7 @@ void wiimote::on_mem_read(MemReadRequest const &req) {
                 log_info("Detected nunchuk");
                 m_extension = NunchukRaw{};
                 break;
+            case extension_id::BUILTIN_MPLS:
             case extension_id::MPLS:
                 log_info("Detected motionplus");
                 m_extension = {};
@@ -238,7 +250,7 @@ void wiimote::on_mem_read(MemReadRequest const &req) {
                 break;
             case extension_id::INACTIVE_MPLS:
             {
-                init_motionplus();
+                log_info("Received inactive mpls");
                 if (std::holds_alternative<NunchukRaw>(m_extension)){
                     activate_motionplus(MotionPlusMode::NUNCHUK_PASSTHROUGH);
                 }
@@ -248,9 +260,10 @@ void wiimote::on_mem_read(MemReadRequest const &req) {
                 else {
                     activate_motionplus(MotionPlusMode::MOTIONPLUS_ONLY);
                 }
-                update_motionplus();
+//                update_motionplus();
                 break;
             }
+
 
             case extension_id::DEACTIVATED_MPLS_ACTIVE_EXT:
             {
@@ -335,8 +348,7 @@ size_t wiimote::handle_extension_data(std::span<uint8_t> data) {
 }
 
 void wiimote::handle_wiimote_calibration_data(std::span<const uint8_t> data, bool retry_on_checksum_fail) {
-    //log_info("Calibrating wiimote accelerometers");
-    const uint8_t checksum = std::accumulate(data.begin(), data.end() - 1, 0x55, std::plus<uint8_t>());
+    const uint8_t checksum = std::accumulate(data.begin(), data.end() - 1, 0x55, std::plus<>());
 
     const auto calib_data = (WiimoteCalibrationData *) data.data();
     if (checksum != calib_data->checksum) {
@@ -352,6 +364,7 @@ void wiimote::handle_wiimote_calibration_data(std::span<const uint8_t> data, boo
         return;
     }
 
+    log_info("Calibrating wiimote");
     std::scoped_lock acc_lock(m_acc_mutex);
     auto &calib = m_state.acc_calib;
     calib.zero.x = calib_data->x_zero_high << 2 | calib_data->x_zero_low;
